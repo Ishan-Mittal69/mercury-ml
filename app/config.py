@@ -11,7 +11,7 @@ class Settings(BaseSettings):
 
     # ── Gemini ────────────────────────────────────────────────────────────────
     GEMINI_API_KEY: str = ""
-    GEMINI_MODEL: str = "gemini-3-flash"
+    GEMINI_MODEL: str = "gemini-2.5-flash"
     GEMINI_TIMEOUT: float = Field(default=60.0, gt=0)
     GEMINI_MAX_RETRIES: int = Field(default=3, ge=1, le=10)
 
