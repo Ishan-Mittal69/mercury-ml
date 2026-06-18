@@ -1,17 +1,44 @@
-import os
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# ── Model ─────────────────────────────────────────────────────────────────────
-# Path to CTranslate2 / OPUS-MT / NLLB model directory.
-# Leave empty until weights are ready — Gemini handles everything until then.
-MODEL_PATH: str = os.getenv("MODEL_PATH", "")
 
-# Confidence below this → fall back to Gemini for that segment.
-CONFIDENCE_THRESHOLD: float = float(os.getenv("CONFIDENCE_THRESHOLD", "0.7"))
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-# ── Gemini ─────────────────────────────────────────────────────────────────────
-GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-3-flash")
+    # ── Model ─────────────────────────────────────────────────────────────────
+    MODEL_PATH: str = ""
+    CONFIDENCE_THRESHOLD: float = Field(default=0.7, ge=0.0, le=1.0)
 
-# ── Server ────────────────────────────────────────────────────────────────────
-PORT: int = int(os.getenv("PORT", "8000"))
-LOG_LEVEL: str = os.getenv("LOG_LEVEL", "info")
+    # ── Gemini ────────────────────────────────────────────────────────────────
+    GEMINI_API_KEY: str = ""
+    GEMINI_MODEL: str = "gemini-3-flash"
+    GEMINI_TIMEOUT: float = Field(default=60.0, gt=0)
+    GEMINI_MAX_RETRIES: int = Field(default=3, ge=1, le=10)
+
+    # ── Request limits ────────────────────────────────────────────────────────
+    MAX_SEGMENTS_PER_REQUEST: int = Field(default=500, ge=1)
+    MAX_TEXT_LENGTH: int = Field(default=2000, ge=1)
+
+    # ── Server ────────────────────────────────────────────────────────────────
+    PORT: int = Field(default=8000, ge=1, le=65535)
+    LOG_LEVEL: str = "info"
+    LOG_FORMAT: str = "json"  # "json" | "text"
+
+    @field_validator("LOG_LEVEL")
+    @classmethod
+    def validate_log_level(cls, v: str) -> str:
+        allowed = {"debug", "info", "warning", "error", "critical"}
+        if v.lower() not in allowed:
+            raise ValueError(f"LOG_LEVEL must be one of {allowed}")
+        return v.lower()
+
+    @property
+    def gemini_ready(self) -> bool:
+        return bool(self.GEMINI_API_KEY)
+
+    @property
+    def model_configured(self) -> bool:
+        return bool(self.MODEL_PATH)
+
+
+settings = Settings()
