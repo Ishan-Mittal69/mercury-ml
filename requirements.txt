@@ -7,6 +7,10 @@ tenacity>=9.0
 prometheus-client>=0.21.0
 python-json-logger>=2.0
 
-# Uncomment when model weights are ready:
-# ctranslate2>=4.4.0
-# sentencepiece>=0.2.0
+# Own model (M2M100 fine-tuned, 4-bit NF4)
+transformers>=4.40.0
+torch>=2.0.0
+bitsandbytes>=0.43.0
+accelerate>=0.27.0
+safetensors>=0.4.0
+sentencepiece>=0.2.0
