@@ -37,23 +37,28 @@ async def translate(
     results: dict[str, dict] = {}
     needs_gemini: list[dict] = []
 
-    # ── 1. Own model pass ─────────────────────────────────────────────────────
+    # ── 1. Own model pass (batch, non-blocking) ───────────────────────────────
     if model.is_loaded():
-        for seg in segments:
-            try:
-                translated, confidence = model.translate(seg["text"], source_lang, target_lang)
-                if confidence >= settings.CONFIDENCE_THRESHOLD:
-                    results[seg["id"]] = {
-                        "id": seg["id"],
-                        "text": translated,
-                        "confidence": round(confidence, 4),
-                    }
-                    metrics.translate_segments_total.labels(provider="model").inc()
-                else:
-                    needs_gemini.append(seg)
-            except Exception as exc:
-                logger.warning("Model error seg=%s: %s — routing to Gemini", seg["id"], exc)
-                needs_gemini.append(seg)
+        import asyncio
+        loop = asyncio.get_event_loop()
+        try:
+            batch_results = await loop.run_in_executor(
+                None,
+                model.translate_batch,
+                [s["text"] for s in segments],
+                source_lang,
+                target_lang,
+            )
+            for seg, (translated, confidence) in zip(segments, batch_results):
+                results[seg["id"]] = {
+                    "id": seg["id"],
+                    "text": translated,
+                    "confidence": round(confidence, 4),
+                }
+                metrics.translate_segments_total.labels(provider="model").inc()
+        except Exception as exc:
+            logger.warning("Model batch error: %s — routing all to Gemini", exc)
+            needs_gemini = list(segments)
     else:
         needs_gemini = list(segments)
 
