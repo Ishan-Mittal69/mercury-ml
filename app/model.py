@@ -25,18 +25,19 @@ class TranslationModel:
 
     def _load(self, path: str) -> None:
         """
-        Blocking model load — called from a thread pool, not the event loop.
+        Load a CTranslate2-converted opus-mt model produced by training/finetune_en_fr.py.
 
-        CTranslate2 + SentencePiece:
-            import ctranslate2, sentencepiece
-            self._ct2 = ctranslate2.Translator(path, device="auto", inter_threads=4)
-            self._sp  = sentencepiece.SentencePieceProcessor(path + "/source.spm")
-
-        Triton gRPC:
-            import tritonclient.grpc as triton
-            self._client = triton.InferenceServerClient(url=TRITON_URL)
+        To activate when ct2_model/ is ready:
+          1. pip install ctranslate2 sentencepiece  (uncomment in requirements.txt)
+          2. Remove the `raise` line at the bottom
+          3. Uncomment the 5 lines above it
         """
-        raise NotImplementedError("Model weights not yet available — implement _load()")
+        # import ctranslate2
+        # import sentencepiece
+        # self._ct2 = ctranslate2.Translator(path, device="auto", inter_threads=4, intra_threads=4)
+        # self._sp_src = sentencepiece.SentencePieceProcessor(os.path.join(path, "source.spm"))
+        # self._sp_tgt = sentencepiece.SentencePieceProcessor(os.path.join(path, "target.spm"))
+        raise NotImplementedError("Model weights not yet available — uncomment _load() body")
 
     @classmethod
     def get(cls) -> "TranslationModel":
@@ -81,18 +82,19 @@ class TranslationModel:
     def translate(self, text: str, source_lang: str, target_lang: str) -> tuple[str, float]:
         """
         Translate one segment. Returns (translated_text, confidence 0–1).
-
-        CTranslate2 example:
-            tokens = self._sp.encode(text, out_type=str)
-            result = self._ct2.translate_batch(
-                [tokens],
-                target_prefix=[[f">>>{target_lang}<<<"]],
-                max_decoding_length=512,
-                beam_size=4,
-            )[0]
-            decoded = self._sp.decode(result.hypotheses[0])
-            # Normalise log-prob score to 0–1 range
-            confidence = min(max(result.scores[0] / -10.0, 0.0), 1.0)
-            return decoded, confidence
+        Uncomment body when _load() is implemented.
         """
-        raise NotImplementedError("translate() not implemented — model stub")
+        # tokens = self._sp_src.encode(text, out_type=str)
+        # result = self._ct2.translate_batch(
+        #     [tokens],
+        #     beam_size=4,
+        #     max_decoding_length=256,
+        # )[0]
+        # decoded = self._sp_tgt.decode(result.hypotheses[0])
+        # # CTranslate2 scores are log-probs (negative). Normalise to 0-1:
+        # # score of -0.1 → ~0.9 confidence; score of -2.0 → ~0.1 confidence
+        # import math
+        # confidence = math.exp(result.scores[0] / max(len(result.hypotheses[0]), 1))
+        # confidence = min(max(confidence, 0.0), 1.0)
+        # return decoded, confidence
+        raise NotImplementedError("translate() not implemented — uncomment body after _load()")
