@@ -10,3 +10,10 @@ models/
 *.bin
 *.pt
 *.safetensors
+headout-*/
+headout-translator-fp32/
+.idea/
+.venv/
+*.bin
+*.safetensors
+__pycache__/
