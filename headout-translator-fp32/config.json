@@ -1,0 +1,46 @@
+{
+  "transformers_version": "5.12.1",
+  "architectures": [
+    "M2M100ForConditionalGeneration"
+  ],
+  "output_hidden_states": false,
+  "return_dict": true,
+  "dtype": "float32",
+  "chunk_size_feed_forward": 0,
+  "is_encoder_decoder": true,
+  "id2label": {
+    "0": "LABEL_0",
+    "1": "LABEL_1"
+  },
+  "label2id": {
+    "LABEL_0": 0,
+    "LABEL_1": 1
+  },
+  "problem_type": null,
+  "vocab_size": 256206,
+  "max_position_embeddings": 1024,
+  "encoder_layers": 24,
+  "encoder_ffn_dim": 8192,
+  "encoder_attention_heads": 16,
+  "decoder_layers": 24,
+  "decoder_ffn_dim": 8192,
+  "decoder_attention_heads": 16,
+  "encoder_layerdrop": 0,
+  "decoder_layerdrop": 0,
+  "use_cache": false,
+  "activation_function": "relu",
+  "d_model": 1024,
+  "dropout": 0.1,
+  "attention_dropout": 0.1,
+  "activation_dropout": 0.0,
+  "init_std": 0.02,
+  "decoder_start_token_id": 2,
+  "scale_embedding": true,
+  "pad_token_id": 1,
+  "bos_token_id": 0,
+  "eos_token_id": 2,
+  "tie_word_embeddings": false,
+  "_name_or_path": "headout-translator",
+  "model_type": "m2m_100",
+  "output_attentions": false
+}

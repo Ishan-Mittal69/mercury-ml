@@ -1,0 +1,8 @@
+{
+  "src_lang": "eng_Latn",
+  "tgt_lang": "fra_Latn",
+  "fra_token_id": 256057,
+  "max_new_tokens": 64,
+  "num_beams": 4,
+  "length_penalty": 0.6
+}

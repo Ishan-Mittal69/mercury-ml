@@ -1,0 +1,27 @@
+<component name="InspectionProjectProfileManager">
+  <profile version="1.0">
+    <option name="myName" value="Project Default" />
+    <inspection_tool class="PyPackageRequirementsInspection" enabled="true" level="WARNING" enabled_by_default="true">
+      <option name="ignoredPackages">
+        <list>
+          <option value="opentelemetry-api" />
+          <option value="opentelemetry-sdk" />
+          <option value="opentelemetry-instrumentation" />
+          <option value="opentelemetry-instrumentation-django" />
+          <option value="opentelemetry-instrumentation-psycopg2" />
+          <option value="opentelemetry-instrumentation-requests" />
+          <option value="opentelemetry-instrumentation-pymongo" />
+          <option value="opentelemetry-instrumentation-mysql" />
+          <option value="opentelemetry-exporter-otlp" />
+        </list>
+      </option>
+    </inspection_tool>
+    <inspection_tool class="PyPep8NamingInspection" enabled="true" level="WEAK WARNING" enabled_by_default="true">
+      <option name="ignoredErrors">
+        <list>
+          <option value="N806" />
+        </list>
+      </option>
+    </inspection_tool>
+  </profile>
+</component>

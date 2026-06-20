@@ -50,54 +50,55 @@ class TranslationModel:
         self._device = "cpu"
 
     def _load(self, path: str) -> None:
-        import json
-        import torch
-        from transformers import PreTrainedTokenizerFast, AutoModelForSeq2SeqLM, AutoConfig
+        import json, os
+        from transformers import PreTrainedTokenizerFast
 
-        logger.info("Loading tokenizer from %s", path)
-        # tokenizer_config.json was saved with transformers 5.0 (extra_special_tokens as list,
-        # tokenizer_class "TokenizersBackend") — incompatible with 4.x. Load the fast tokenizer
-        # directly from tokenizer.json and reconstruct lang_code_to_id from added tokens.
-        self._tok = PreTrainedTokenizerFast(
-            tokenizer_file=f"{path}/tokenizer.json",
-            bos_token="<s>",
-            eos_token="</s>",
-            unk_token="<unk>",
-            sep_token="</s>",
-            pad_token="<pad>",
-            cls_token="<s>",
-            mask_token="<mask>",
-        )
-        # Build lang_code_to_id from added_tokens in tokenizer.json (FLORES-200 codes)
+        # Detect CTranslate2 model (has model.bin) vs HuggingFace (has model.safetensors)
+        self._is_ct2 = os.path.exists(os.path.join(path, "model.bin"))
+
+        # Load shared tokenizer (works for both CT2 and HF models)
         with open(f"{path}/tokenizer.json") as f:
             tok_data = json.load(f)
+        self._tok = PreTrainedTokenizerFast(
+            tokenizer_file=f"{path}/tokenizer.json",
+            bos_token="<s>", eos_token="</s>",
+            unk_token="<unk>", pad_token="<pad>",
+        )
         self._tok.lang_code_to_id = {
             t["content"]: t["id"]
             for t in tok_data.get("added_tokens", [])
-            if "_" in t["content"] and len(t["content"]) > 4  # language code pattern like eng_Latn
+            if "_" in t["content"] and len(t["content"]) > 4
         }
         self._tok.src_lang = "eng_Latn"
 
-        # Weights are float32 (~4.8GB) — quantization_config in config.json is a training
-        # artifact. Strip it so bitsandbytes isn't invoked (requires CUDA, not available here).
-        config = AutoConfig.from_pretrained(path)
-        if hasattr(config, "quantization_config"):
-            config.quantization_config = None
-
-        device = (
-            "cuda" if torch.cuda.is_available()
-            else "mps" if torch.backends.mps.is_available()
-            else "cpu"
-        )
-        logger.info("Loading model weights from %s (bfloat16, device=%s)", path, device)
-        self._model = AutoModelForSeq2SeqLM.from_pretrained(
-            path,
-            config=config,
-            torch_dtype=torch.bfloat16,
-            low_cpu_mem_usage=True,
-        ).to(device)
-        self._device = device
-        self._model.eval()
+        if self._is_ct2:
+            # ── CTranslate2 INT8 path (fast, low memory) ──────────────────────
+            import ctranslate2
+            self._shared_vocab = json.load(open(f"{path}/shared_vocabulary.json"))
+            self._id_to_token  = {i: w for i, w in enumerate(self._shared_vocab)}
+            self._vocab_lookup = {w: i for i, w in enumerate(self._shared_vocab)}
+            self._translator   = ctranslate2.Translator(
+                path, device="cpu", inter_threads=4, intra_threads=4,
+            )
+            logger.info("CTranslate2 INT8 model loaded from %s", path)
+        else:
+            # ── HuggingFace path (bfloat16, tries MPS/CUDA) ───────────────────
+            import torch
+            from transformers import AutoModelForSeq2SeqLM, AutoConfig
+            config = AutoConfig.from_pretrained(path)
+            if hasattr(config, "quantization_config"):
+                config.quantization_config = None
+            device = (
+                "cuda" if torch.cuda.is_available()
+                else "mps" if torch.backends.mps.is_available()
+                else "cpu"
+            )
+            self._model = AutoModelForSeq2SeqLM.from_pretrained(
+                path, config=config, torch_dtype=torch.bfloat16, low_cpu_mem_usage=True,
+            ).to(device)
+            self._device = device
+            self._model.eval()
+            logger.info("HuggingFace model loaded from %s (device=%s)", path, device)
 
     @classmethod
     def get(cls) -> "TranslationModel":
@@ -169,63 +170,72 @@ class TranslationModel:
         seq_len = max(output.sequences[seq_idx].shape[0] - input_len, 1)
         return min(max(math.exp(log_prob / seq_len), 0.0), 1.0)
 
-    def translate(self, text: str, source_lang: str, target_lang: str) -> tuple[str, float]:
-        import torch
+    def _ct2_translate_batch(self, texts: list[str], flores_src: str, flores_tgt: str) -> list[tuple[str, float]]:
+        """CTranslate2 batch inference."""
+        self._tok.src_lang = flores_src
+        enc = self._tok(texts, return_tensors=None, add_special_tokens=True, padding=True)
+        batch_tokens = [
+            [flores_src] + [self._id_to_token.get(i, "<unk>") for i in ids]
+            for ids in enc["input_ids"]
+        ]
+        output = self._translator.translate_batch(
+            batch_tokens,
+            target_prefix=[[flores_tgt]] * len(texts),
+            beam_size=_NUM_BEAMS,
+            max_decoding_length=_MAX_NEW_TOKENS,
+        )
+        results = []
+        for res in output:
+            tokens = res.hypotheses[0][1:]  # skip flores_tgt token
+            ids = [self._vocab_lookup[t] for t in tokens if t in self._vocab_lookup]
+            decoded = self._tok.decode(ids, skip_special_tokens=True)
+            score = res.scores[0] if res.scores else -1.0
+            confidence = min(max(math.exp(score / max(len(tokens), 1)), 0.0), 1.0)
+            results.append((decoded, confidence))
+        return results
 
+    def translate(self, text: str, source_lang: str, target_lang: str) -> tuple[str, float]:
         flores_src = self._flores(source_lang)
         flores_tgt = self._flores(target_lang)
         if not flores_src or not flores_tgt:
             raise ValueError(f"Unsupported language pair: {source_lang}→{target_lang}")
 
+        if self._is_ct2:
+            return self._ct2_translate_batch([text], flores_src, flores_tgt)[0]
+
+        import torch
         tgt_token_id = self._tgt_token_id(flores_tgt)
         inputs = self._encode([text], flores_src)
         inputs = {k: v.to(self._device) for k, v in inputs.items()}
         input_len = inputs["input_ids"].shape[1]
-
         with torch.no_grad():
             output = self._model.generate(
-                **inputs,
-                forced_bos_token_id=tgt_token_id,
-                num_beams=_NUM_BEAMS,
-                max_new_tokens=_MAX_NEW_TOKENS,
-                return_dict_in_generate=True,
-                output_scores=True,
+                **inputs, forced_bos_token_id=tgt_token_id,
+                num_beams=_NUM_BEAMS, max_new_tokens=_MAX_NEW_TOKENS,
+                return_dict_in_generate=True, output_scores=True,
             )
-
         translated = self._tok.decode(output.sequences[0], skip_special_tokens=True)
-        confidence = self._confidence(output, 0, input_len)
-        return translated, confidence
+        return translated, self._confidence(output, 0, input_len)
 
-    def translate_batch(
-        self,
-        texts: list[str],
-        source_lang: str,
-        target_lang: str,
-    ) -> list[tuple[str, float]]:
-        import torch
-
+    def translate_batch(self, texts: list[str], source_lang: str, target_lang: str) -> list[tuple[str, float]]:
         flores_src = self._flores(source_lang)
         flores_tgt = self._flores(target_lang)
         if not flores_src or not flores_tgt:
             raise ValueError(f"Unsupported language pair: {source_lang}→{target_lang}")
 
+        if self._is_ct2:
+            return self._ct2_translate_batch(texts, flores_src, flores_tgt)
+
+        import torch
         tgt_token_id = self._tgt_token_id(flores_tgt)
         inputs = self._encode(texts, flores_src)
         inputs = {k: v.to(self._device) for k, v in inputs.items()}
         input_len = inputs["input_ids"].shape[1]
-
         with torch.no_grad():
             output = self._model.generate(
-                **inputs,
-                forced_bos_token_id=tgt_token_id,
-                num_beams=_NUM_BEAMS,
-                max_new_tokens=_MAX_NEW_TOKENS,
-                return_dict_in_generate=True,
-                output_scores=True,
+                **inputs, forced_bos_token_id=tgt_token_id,
+                num_beams=_NUM_BEAMS, max_new_tokens=_MAX_NEW_TOKENS,
+                return_dict_in_generate=True, output_scores=True,
             )
-
         translated_texts = self._tok.batch_decode(output.sequences, skip_special_tokens=True)
-        return [
-            (text, self._confidence(output, i, input_len))
-            for i, text in enumerate(translated_texts)
-        ]
+        return [(t, self._confidence(output, i, input_len)) for i, t in enumerate(translated_texts)]
